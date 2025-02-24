@@ -32,34 +32,81 @@ export const sequelize = new Sequelize({
   dialect: 'sqlite',
   dialectModule: sqlite,
   storage: DB_FILE_PATH,
-  logging: console.log,
+  logging: false, // 关闭SQL日志
 });
-
-// 初始化模型
-initConfig(sequelize);
-initSession(sequelize);
-initMessage(sequelize);
-initKeyword(sequelize);
-initPlugin(sequelize);
-initInstance(sequelize);
-initTransfer(sequelize);
-initReplace(sequelize);
 
 // 异步初始化和数据填充函数
 async function initDb(): Promise<void> {
-  const fcount = await Config.count();
-  if (fcount === 0) {
-    await Config.create({
-      platform_id: '',
-      instance_id: '',
-      global: true,
-      active: true,
-      context_count: 5,
-    });
-  }
+  try {
+    // 1. 初始化所有模型
+    console.log('正在初始化数据库模型...');
+    initConfig(sequelize);
+    initSession(sequelize);
+    initMessage(sequelize);
+    initKeyword(sequelize);
+    initPlugin(sequelize);
+    initInstance(sequelize);
+    initTransfer(sequelize);
+    initReplace(sequelize);
 
-  const count = await Keyword.count();
-  if (count === 0) {
+    // 2. 测试数据库连接
+    await sequelize.authenticate();
+    console.log('数据库连接成功');
+
+    // 3. 同步数据库结构
+    await sequelize.sync({ force: false });
+    console.log('数据库表结构同步完成');
+
+    // 4. 初始化基础配置
+    const configCount = await Config.count();
+    if (configCount === 0) {
+      console.log('正在初始化基础配置...');
+      await Config.create({
+        platform_id: '',
+        instance_id: '',
+        global: true,
+        active: true,
+        context_count: 5,
+        has_keyword_match: true,
+        has_transfer: true,
+        has_replace: true,
+        has_use_gpt: false,
+        has_mouse_close: false,
+        has_esc_close: false,
+        has_paused: false,
+      });
+      console.log('基础配置初始化完成');
+    }
+
+    // 5. 初始化其他数据
+    await Promise.all([
+      initializeKeywords(),
+      initializeTransferKeywords(),
+      initializeReplaceKeywords(),
+    ]);
+
+    // 6. 清理旧版本插件
+    await Plugin.destroy({
+      where: {
+        version: '1.0.0',
+      },
+    });
+
+    console.log('数据库初始化完成');
+  } catch (error) {
+    console.error('数据库初始化失败:', error);
+    if (error instanceof Error) {
+      console.error('错误堆栈:', error.stack);
+    }
+    process.exit(1);
+  }
+}
+
+// 初始化关键词
+async function initializeKeywords(): Promise<void> {
+  const keywordCount = await Keyword.count();
+  if (keywordCount === 0) {
+    console.log('正在初始化关键词...');
     const replies = [
       {
         keyword:
@@ -167,12 +214,16 @@ async function initDb(): Promise<void> {
         platform_id: '',
       },
     ];
-
     await Keyword.bulkCreate(replies);
+    console.log('关键词初始化完成');
   }
+}
 
+// 初始化转人工关键词
+async function initializeTransferKeywords(): Promise<void> {
   const transferCount = await TransferKeyword.count();
   if (transferCount === 0) {
+    console.log('正在初始化转人工关键词...');
     const transfers = [
       {
         keyword: '转人工',
@@ -208,17 +259,22 @@ async function initDb(): Promise<void> {
       },
     ];
     await TransferKeyword.bulkCreate(transfers);
+    console.log('转人工关键词初始化完成');
   }
+}
 
+// 初始化替换关键词
+async function initializeReplaceKeywords(): Promise<void> {
   const replaceCount = await ReplaceKeyword.count();
   if (replaceCount === 0) {
+    console.log('正在初始化替换关键词...');
     const replaces = [
       {
         keyword: '微信',
         replace: 'V兴',
         has_regular: false,
       },
-      // “线下”、“电话”、“转账”、“到付”、“shua单” 淘宝、京东、微信、QQ
+      // "线下"、"电话"、"转账"、"到付"、"shua单" 淘宝、京东、微信、QQ
       {
         keyword: '线下',
         replace: 'X下',
@@ -246,27 +302,14 @@ async function initDb(): Promise<void> {
       },
     ];
     await ReplaceKeyword.bulkCreate(replaces);
+    console.log('替换关键词初始化完成');
   }
-
-  // 因为 Plugin 1.0.0 版本不支持了，这里直接删除
-  await Plugin.destroy({
-    where: {
-      version: '1.0.0',
-    },
-  });
 }
 
-(async () => {
-  try {
-    await sequelize.sync();
-    console.log('Database connection has been established successfully.');
-    await initDb();
-  } catch (error) {
-    console.error('Failed to sync database:', error);
-    if (error instanceof Error) {
-      console.error(error.stack);
-    }
-  }
-})();
+// 立即执行初始化
+initDb().catch((error) => {
+  console.error('数据库初始化过程中发生错误:', error);
+  process.exit(1);
+});
 
 export default sequelize;

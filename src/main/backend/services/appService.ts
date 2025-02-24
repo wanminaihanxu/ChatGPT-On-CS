@@ -21,29 +21,38 @@ export class AppService {
       app_id: string;
     }[]
   > {
-    const instances = await Instance.findAll();
-    return instances.map((instance) => ({
-      task_id: String(instance.id),
-      env_id: instance.env_id,
-      app_id: instance.app_id,
-    }));
+    try {
+      const instances = await Instance.findAll();
+      return instances.map((instance) => ({
+        task_id: String(instance.id),
+        env_id: instance.env_id,
+        app_id: instance.app_id,
+      }));
+    } catch (error) {
+      console.error('Error in getTasks:', error);
+      return [];
+    }
   }
 
   /**
    * 初始化全部任务
    */
   public async initTasks(): Promise<void> {
-    const instances = await Instance.findAll();
-    await this.dispatchService.updateTasks(instances);
+    try {
+      const instances = await Instance.findAll();
+      await this.dispatchService.updateTasks(instances);
+    } catch (error) {
+      console.error('Error in initTasks:', error);
+    }
   }
 
   /**
    * 添加一个任务
    */
   public async addTask(appId: string): Promise<Instance | null> {
-    // 使用事务
-    return this.sequelize
-      .transaction(async (t: Transaction) => {
+    try {
+      // 使用事务
+      return await this.sequelize.transaction(async (t: Transaction) => {
         const instance = await Instance.create(
           {
             app_id: appId,
@@ -82,6 +91,10 @@ export class AppService {
         console.error('Transaction failed:', error);
         throw error; // 可根据需求自定义错误处理逻辑
       });
+    } catch (error) {
+      console.error('Error in addTask:', error);
+      return null;
+    }
   }
 
   /**

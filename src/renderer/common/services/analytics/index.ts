@@ -11,29 +11,12 @@ interface EventData {
 export function sendEvent(
   event_name: string,
   title: string,
-  event_data: EventData = {},
+  event_data: { [key: string]: string | number | undefined } = {},
 ): void {
-  const payload = {
-    type: 'event',
-    payload: {
-      website: SITE_ID,
-      name: event_name,
-      title,
-      data: event_data,
-    },
-  };
-
-  (async () => {
-    try {
-      await axios.post(UMAMI_API_ENDPOINT, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    } catch (error) {
-      console.error('Error tracking event:', error);
-    }
-  })();
+  // 仅在开发环境下打印日志
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Analytics event:', { event_name, title, event_data });
+  }
 }
 
 // Predefined event: Button click

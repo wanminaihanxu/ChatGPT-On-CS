@@ -189,7 +189,7 @@
     "css-minimizer-webpack-plugin": "^5.0.1",
     "detect-port": "^1.5.1",
     "dotenv": "^16.4.4",
-    "electron": "^26.2.1",
+    "electron": "26.2.1",
     "electron-builder": "^24.13.3",
     "electron-devtools-installer": "^3.2.0",
     "electron-rebuild": "^3.2.9",
@@ -218,9 +218,8 @@
     "react-refresh": "^0.14.0",
     "react-test-renderer": "^18.2.0",
     "rimraf": "^5.0.1",
-    "sass": "^1.67.0",
-    "sass-loader": "^13.3.2",
-    "sqlite3": "^5.1.7",
+    "sass": "1.63.6",
+    "sass-loader": "12.6.0",
     "style-loader": "^3.3.3",
     "terser-webpack-plugin": "^5.3.9",
     "ts-jest": "^29.1.1",
@@ -246,5 +245,15 @@
       "src/main/**"
     ],
     "logLevel": "quiet"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "core-js",
+      "core-js-pure",
+      "electron",
+      "lzma-native",
+      "sqlite3"
+    ]
   }
 }

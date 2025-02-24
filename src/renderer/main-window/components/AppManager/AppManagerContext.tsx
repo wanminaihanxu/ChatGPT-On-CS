@@ -76,7 +76,13 @@ const usePlatformList = () => {
 };
 
 const useTaskList = () => {
-  return useQuery(['tasks'], () => getTasks());
+  return useQuery(['tasks'], () => getTasks(), {
+    refetchInterval: 5000, // 每5秒刷新一次
+    refetchIntervalInBackground: false, // 在后台不刷新
+    staleTime: 4000, // 数据在4秒内被认为是新鲜的
+    cacheTime: 10 * 60 * 1000, // 缓存10分钟
+    retry: 3, // 失败时最多重试3次
+  });
 };
 
 /**
