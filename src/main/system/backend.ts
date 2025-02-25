@@ -29,15 +29,16 @@ class BackendServiceManager {
   }
 
   async start() {
-    if (process.env.NODE_ENV === 'development') {
-      this.port = 9999;
-      return;
-    }
-
     // 避免重复启动时端口冲突
     if (!this.port) {
       const port = await this.getAvailablePort();
       this.port = port;
+    }
+
+    // 在开发环境下不需要启动外部进程，直接返回
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Development mode: Using port ${this.port}`);
+      return;
     }
 
     this.launchProcess(this.port);

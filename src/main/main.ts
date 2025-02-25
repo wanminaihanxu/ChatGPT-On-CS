@@ -15,9 +15,17 @@ import { app, BrowserWindow, shell } from 'electron';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import setupIpcHandlers from './ipcHandlers';
-import setupCron from './cron';
+import setupCron, { setDevelopmentPort } from './cron';
 import BackendServiceManager from './system/backend';
 import Server from './backend/backend';
+
+const RESOURCES_PATH = app.isPackaged
+  ? path.join(process.resourcesPath, 'assets')
+  : path.join(__dirname, '../../assets');
+
+const getAssetPath = (...paths: string[]): string => {
+  return path.join(RESOURCES_PATH, ...paths);
+};
 
 let mainWindow: BrowserWindow | null = null;
 let backendServiceManager: BackendServiceManager | null = null;
@@ -32,6 +40,10 @@ const stopBackendServiceManager = async () => {
 // https://learn.microsoft.com/en-us/answers/questions/1193062/how-to-fix-electron-program-gpu-process-isnt-usabl
 app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('lang', 'zh-CN');
+
+// 添加字体配置
+app.commandLine.appendSwitch('disable-font-subpixel-positioning');
+app.commandLine.appendSwitch('force-color-profile', 'srgb');
 
 app.on('window-all-closed', async () => {
   // Respect the OSX convention of having the application in memory even
@@ -85,23 +97,7 @@ const createWindow = async () => {
     // await installExtensions();
   }
 
-  const RESOURCES_PATH = app.isPackaged
-    ? path.join(process.resourcesPath, 'assets')
-    : path.join(__dirname, '../../assets');
-
-  backendServiceManager = new BackendServiceManager(
-    path.join(
-      RESOURCES_PATH,
-      process.env.BKEXE_PATH || './backend/__main__.exe',
-    ),
-  );
-
-  await backendServiceManager.start();
-
-  const getAssetPath = (...paths: string[]): string => {
-    return path.join(RESOURCES_PATH, ...paths);
-  };
-
+  // 先创建主窗口
   mainWindow = new BrowserWindow({
     show: false,
     width: 528,
@@ -112,6 +108,14 @@ const createWindow = async () => {
       preload: app.isPackaged
         ? path.join(__dirname, 'preload.js')
         : path.join(__dirname, '../../.erb/dll/preload.js'),
+      defaultFontFamily: {
+        standard: 'PingFang SC',
+        serif: 'PingFang SC',
+        sansSerif: 'PingFang SC',
+      },
+      defaultFontSize: 14,
+      defaultMonospaceFontSize: 12,
+      minimumFontSize: 8,
     },
   });
 
@@ -121,19 +125,39 @@ const createWindow = async () => {
     return;
   }
 
+  if (process.env.NODE_ENV === 'development') {
+    // 在开发环境下，创建并保存 BackendServiceManager 实例
+    backendServiceManager = new BackendServiceManager('');
+    await backendServiceManager.start();
+    const port = backendServiceManager.getPort();
+    console.log(`Development mode: BackendServiceManager using port ${port}`);
+
+    // 设置开发环境端口
+    setDevelopmentPort(port);
+
+    // 创建并启动Express服务
+    const server = new Server(port, mainWindow);
+    try {
+      await server.start();
+      console.log(`Express server is running on http://localhost:${port}`);
+    } catch (error) {
+      console.error('Failed to start Express server:', error);
+      throw error;
+    }
+  } else {
+    // 在生产环境下，启动后端服务
+    backendServiceManager = new BackendServiceManager(
+      path.join(RESOURCES_PATH, process.env.BKEXE_PATH || './backend/__main__.exe'),
+    );
+
+    await backendServiceManager.start();
+
+    const server = new Server(backendServiceManager.getPort(), mainWindow);
+    await server.start();
+  }
+
   setupIpcHandlers(mainWindow, backendServiceManager);
   setupCron(mainWindow, backendServiceManager);
-
-  const server = new Server(backendServiceManager.getPort(), mainWindow);
-  // 启动服务器
-  server
-    .start()
-    .then(() => {
-      console.log('Server started successfully');
-    })
-    .catch((err) => {
-      console.error('Error starting server:', err);
-    });
 
   mainWindow.loadURL(resolveHtmlPath('main.html'));
 

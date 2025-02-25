@@ -107,72 +107,96 @@ export class DispatchService {
   }
 
   public async checkHealth(): Promise<boolean> {
-    try {
-      return await this.io.timeout(5000).emitWithAck('systemService-health');
-    } catch (error) {
-      console.error('Failed to check health', error);
-      return false;
+    const maxRetries = 3;
+    let attempt = 0;
+
+    while (attempt < maxRetries) {
+      try {
+        const result = await this.io.timeout(10000).emitWithAck('systemService-health');
+        return result;
+      } catch (error) {
+        console.error(`Attempt ${attempt + 1} failed to check health:`, error);
+        attempt++;
+        if (attempt < maxRetries) {
+          // 等待 1 秒后重试
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
     }
+
+    return false;
   }
 
   public async syncConfig(): Promise<boolean> {
-    try {
-      let cfg = await this.configController.getConfigByType({
-        appId: undefined,
-        instanceId: undefined,
-        type: 'driver',
-      });
+    const maxRetries = 3;
+    let attempt = 0;
 
-      if (!cfg) {
-        return false;
+    while (attempt < maxRetries) {
+      try {
+        let cfg = await this.configController.getConfigByType({
+          appId: undefined,
+          instanceId: undefined,
+          type: 'driver',
+        });
+
+        if (!cfg) {
+          return false;
+        }
+
+        let hasPaused = false;
+        if ('hasPaused' in cfg) {
+          hasPaused = cfg.hasPaused || false;
+        }
+
+        cfg = await this.configController.getConfigByType({
+          appId: undefined,
+          instanceId: undefined,
+          type: 'generic',
+        });
+
+        if (!cfg) {
+          return false;
+        }
+
+        let jdr = '很高兴为您服务，请问有什么可以帮您？';
+        if ('jinritemaiDefaultReplyMatch' in cfg) {
+          jdr = cfg.jinritemaiDefaultReplyMatch || '';
+        }
+
+        let twkey = '';
+        if ('truncateWordKey' in cfg) {
+          twkey = cfg.truncateWordKey || '';
+        }
+
+        let twcount = 210;
+        if ('truncateWordCount' in cfg) {
+          twcount = cfg.truncateWordCount || 210;
+        }
+
+        // 增加超时时间到 30 秒
+        await emitAndWait(this.io, 'strategyService-updateStatus', {
+          status: hasPaused
+            ? StrategyServiceStatusEnum.STOPPED
+            : StrategyServiceStatusEnum.RUNNING,
+          jdr,
+          twkey,
+          twcount,
+        }, 30000);
+
+        const instances = await Instance.findAll();
+        await this.updateTasks(instances);
+        return true;
+      } catch (error) {
+        console.error(`Attempt ${attempt + 1} failed to sync config:`, error);
+        attempt++;
+        if (attempt < maxRetries) {
+          // 等待 2 秒后重试
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
-
-      let hasPaused = false;
-      if ('hasPaused' in cfg) {
-        hasPaused = cfg.hasPaused || false;
-      }
-
-      cfg = await this.configController.getConfigByType({
-        appId: undefined,
-        instanceId: undefined,
-        type: 'generic',
-      });
-
-      if (!cfg) {
-        return false;
-      }
-
-      let jdr = '很高兴为您服务，请问有什么可以帮您？';
-      if ('jinritemaiDefaultReplyMatch' in cfg) {
-        jdr = cfg.jinritemaiDefaultReplyMatch || '';
-      }
-
-      let twkey = '';
-      if ('truncateWordKey' in cfg) {
-        twkey = cfg.truncateWordKey || '';
-      }
-
-      let twcount = 210;
-      if ('truncateWordCount' in cfg) {
-        twcount = cfg.truncateWordCount || 210;
-      }
-
-      await emitAndWait(this.io, 'strategyService-updateStatus', {
-        status: hasPaused
-          ? StrategyServiceStatusEnum.STOPPED
-          : StrategyServiceStatusEnum.RUNNING,
-        jdr,
-        twkey,
-        twcount,
-      });
-
-      const instances = await Instance.findAll();
-      await this.updateTasks(instances);
-      return true;
-    } catch (error) {
-      console.error('Failed to sync config', error);
-      return false;
     }
+
+    return false;
   }
 
   public async updateTasks(tasks: Instance[]): Promise<
@@ -184,20 +208,33 @@ export class DispatchService {
     | null
   > {
     try {
-      return await emitAndWait(
+      const result = await emitAndWait(
         this.io,
         'strategyService-updateTasks',
         {
           tasks: tasks.map((task) => ({
-            task_id: task.id,
+            task_id: String(task.id),
             app_id: task.app_id,
-            env_id: task.env_id,
+            env_id: task.env_id || 'development',
           })),
         },
-        20000,
+        60000, // 增加超时时间到 60 秒
       );
+
+      if (!result) {
+        console.error('Failed to update tasks: No response');
+        return null;
+      }
+
+      // 确保返回的结果是数组
+      if (!Array.isArray(result)) {
+        console.error('Failed to update tasks: Invalid response format', result);
+        return null;
+      }
+
+      return result;
     } catch (error) {
-      console.error('Failed to add task', error);
+      console.error('Failed to update tasks:', error);
       return null;
     }
   }

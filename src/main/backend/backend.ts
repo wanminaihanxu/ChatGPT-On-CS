@@ -4,6 +4,7 @@ import asyncHandler from 'express-async-handler';
 import bodyParser from 'body-parser';
 import http from 'http';
 import { Server } from 'socket.io';
+import { io as ioClient } from 'socket.io-client';
 import { BrowserWindow, shell } from 'electron';
 import { sequelize } from './ormconfig';
 import { ConfigController } from './controllers/configController';
@@ -40,6 +41,8 @@ class BKServer {
 
   private appService: AppService;
 
+  private mockClient: any;
+
   constructor(port: number, mainWindow: BrowserWindow) {
     this.app = express();
     this.app.use(bodyParser.json());
@@ -51,14 +54,87 @@ class BKServer {
       cors: {
         origin: '*',
         methods: ['GET', 'POST'],
+        credentials: true
       },
       connectionStateRecovery: {
         maxDisconnectionDuration: 2 * 60 * 1000,
         skipMiddlewares: true,
-        // 配置使用 websocket
       },
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'],
+      pingTimeout: 60000,
+      pingInterval: 25000
     });
+
+    // 在开发环境下，模拟一个客户端连接
+    if (process.env.NODE_ENV === 'development') {
+      this.mockClient = ioClient(`ws://localhost:${port}`, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: 5,
+        // 添加 SSL 配置
+        rejectUnauthorized: false,
+        agent: false,
+        upgrade: false,
+        forceNew: true
+      });
+
+      // 添加错误处理
+      this.mockClient.io.on("error", (error: any) => {
+        console.error('Socket.IO error:', error);
+      });
+
+      this.mockClient.io.on("reconnect_attempt", (attempt: number) => {
+        console.log(`Attempting to reconnect... (attempt ${attempt})`);
+      });
+
+      this.mockClient.on('connect', () => {
+        console.log('Development WebSocket client connected');
+      });
+
+      this.mockClient.on('disconnect', () => {
+        console.log('Development WebSocket client disconnected');
+      });
+
+      this.mockClient.on('error', (error: any) => {
+        console.error('Development WebSocket client error:', error);
+      });
+
+      // 模拟响应 strategyService-getAppsInfo 事件
+      this.mockClient.on('strategyService-getAppsInfo', (callback: Function) => {
+        callback([
+          {
+            id: 'default',
+            name: '默认应用',
+            type: 'default',
+            avatar: '',
+            desc: '默认应用描述',
+            env: 'development',
+          },
+        ]);
+      });
+
+      // 添加健康检查响应
+      this.mockClient.on('systemService-health', (callback: Function) => {
+        callback(true);
+      });
+
+      // 添加状态更新响应
+      this.mockClient.on('strategyService-updateStatus', (data: any, callback: Function) => {
+        callback(true);
+      });
+
+      // 添加任务更新响应
+      this.mockClient.on('strategyService-updateTasks', (data: any, callback: Function) => {
+        const tasks = data.tasks || [];
+        callback(tasks.map((task: any) => ({
+          task_id: task.task_id,
+          env_id: 'development',
+          error: undefined
+        })));
+      });
+    }
 
     this.configController = new ConfigController();
     this.messageController = new MessageController();

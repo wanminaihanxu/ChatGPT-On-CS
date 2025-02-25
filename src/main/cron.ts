@@ -3,8 +3,20 @@ import { BrowserWindow } from 'electron';
 import { setCron } from './system/cron';
 import type BackendServiceManager from './system/backend';
 
+let developmentPort: number | null = null;
+
+export const setDevelopmentPort = (port: number) => {
+  developmentPort = port;
+};
+
 const setupCron = (mainWindow: BrowserWindow, bsm: BackendServiceManager) => {
   const baseURL = (url: string) => {
+    if (process.env.NODE_ENV === 'development') {
+      if (!developmentPort) {
+        throw new Error('Development port not set');
+      }
+      return `http://127.0.0.1:${developmentPort}/${url}`;
+    }
     return `http://127.0.0.1:${bsm.getPort()}/${url}`;
   };
 
@@ -15,25 +27,18 @@ const setupCron = (mainWindow: BrowserWindow, bsm: BackendServiceManager) => {
 
   // 每隔 5 秒执行一次检查后端服务是否健康
   setCron('*/5 * * * * *', async () => {
-    if (!bsm) {
-      console.error('BackendServiceManager not found');
-      return;
+    try {
+      const {
+        data: { data },
+      } = await axios.get(baseURL(`api/v1/base/health`));
+      mainWindow.webContents.send('check-health', data);
+    } catch (error) {
+      console.error('Health check failed:', error);
     }
-
-    const {
-      data: { data },
-    } = await axios.get(baseURL(`api/v1/base/health`));
-    mainWindow.webContents.send('check-health', data);
   });
 
   // 每隔 5 秒同步一次 Backend 服务的状态
   setCron('*/20 * * * * *', async () => {
-    if (!bsm) {
-      console.error('BackendServiceManager not found');
-      return;
-    }
-
-    // 为了避免依赖麻烦，这里直接通过 axios 发送请求
     try {
       await axios.post(baseURL('api/v1/base/sync'), {});
     } catch (error) {

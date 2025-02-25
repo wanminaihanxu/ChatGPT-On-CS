@@ -50,49 +50,45 @@ export class AppService {
    * 添加一个任务
    */
   public async addTask(appId: string): Promise<Instance | null> {
+    let transaction;
     try {
-      // 使用事务
-      return await this.sequelize.transaction(async (t: Transaction) => {
-        const instance = await Instance.create(
-          {
-            app_id: appId,
-            created_at: new Date(),
-          },
-          { transaction: t },
-        );
+      // 开始事务
+      transaction = await this.sequelize.transaction();
 
-        // 取得全部 Tasks 然后全部更新
-        const tasks = await Instance.findAll();
-        tasks.push(instance);
+      // 创建实例
+      const instance = await Instance.create(
+        {
+          app_id: appId,
+          created_at: new Date(),
+          env_id: 'development', // 设置默认值
+        },
+        { transaction },
+      );
+
+      // 取得全部 Tasks 然后全部更新
+      const tasks = await Instance.findAll();
+      tasks.push(instance);
+
+      try {
         const result = await this.dispatchService.updateTasks(tasks);
-        if (!result || result.length === 0) {
-          throw new Error('添加任务失败，请重新尝试');
+        if (!result) {
+          throw new Error('更新任务失败：没有收到响应');
         }
 
-        // 遍历 result 检查，判断是否存在 error 属性
-        const err_target = result.find((task) => task.error);
-        if (err_target) {
-          throw new Error(err_target.error);
-        }
-
-        const target = result.find(
-          (task) => task.task_id === String(instance.id),
-        );
-        if (!target) {
-          throw new Error('Failed to find target task');
-        }
-
-        instance.env_id = target.env_id;
-        await instance.save({ transaction: t });
+        // 提交事务
+        await transaction.commit();
         return instance;
-      })
-      .catch((error) => {
-        // 处理错误
-        console.error('Transaction failed:', error);
-        throw error; // 可根据需求自定义错误处理逻辑
-      });
+      } catch (error) {
+        // 如果更新任务失败，回滚事务
+        await transaction.rollback();
+        throw error;
+      }
     } catch (error) {
-      console.error('Error in addTask:', error);
+      // 确保在出错时回滚事务
+      if (transaction) {
+        await transaction.rollback();
+      }
+      console.error('添加任务失败:', error);
       return null;
     }
   }
